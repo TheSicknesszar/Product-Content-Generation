@@ -1,0 +1,5 @@
+{
+  "name": "Product Content Generator",
+  "description": "An AI-powered tool to generate a complete, SEO-optimized content package for refurbished tech products for e-commerce listings, based on OEM label data.",
+  "requestFramePermissions": []
+}
