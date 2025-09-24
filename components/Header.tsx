@@ -2,12 +2,12 @@ import React from 'react';
 
 const Header: React.FC = () => {
   return (
-    <header className="text-center">
-      <h1 className="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">
-        Product Content Generator
+    <header className="text-center sm:text-left">
+      <h1 className="text-xl md:text-2xl font-bold text-ht-accent tracking-wide capitalize">
+        HT Listing Lab
       </h1>
-      <p className="mt-2 text-lg text-slate-400">
-        AI-Powered Content for Your E-Commerce Store
+      <p className="mt-1 text-sm text-slate-400">
+        Content Engine for Refurbished Tech Listings
       </p>
     </header>
   );

@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import type { ProductInput } from '../types';
+import type { ProductInput, CompetitorInput, OEMLabelData } from '../types';
+import SpecPreviewModal from './SpecPreviewModal';
 
 interface InputFormProps {
   productInput: ProductInput;
   setProductInput: React.Dispatch<React.SetStateAction<ProductInput>>;
   onGenerate: () => void;
   isLoading: boolean;
+  onAutoFill: (text: string) => void;
+  isFetchingSpecs: boolean;
+  fetchSpecsError: string | null;
+  previewSpecs: Partial<OEMLabelData> | null;
+  onApplySpecs: (specs: Partial<OEMLabelData>) => void;
+  onCancelPreview: () => void;
 }
 
 const InputField: React.FC<{ label: string; id: string; value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; placeholder?: string }> = ({ label, id, value, onChange, placeholder }) => (
@@ -37,9 +44,12 @@ const TextAreaField: React.FC<{ label: string; id: string; value: string; onChan
 );
 
 
-const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, onGenerate, isLoading }) => {
+const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, onGenerate, isLoading, onAutoFill, isFetchingSpecs, fetchSpecsError, previewSpecs, onApplySpecs, onCancelPreview }) => {
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [isLoadAvailable, setIsLoadAvailable] = useState<boolean>(false);
+  const [competitorErrors, setCompetitorErrors] = useState<Map<number, { name?: string; price?: string }>>(new Map());
+  const [isManualOemVisible, setManualOemVisible] = useState<boolean>(true);
+  const [autoFillText, setAutoFillText] = useState('');
 
   useEffect(() => {
     // Check if saved data exists on component mount
@@ -47,6 +57,45 @@ const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, on
       setIsLoadAvailable(true);
     }
   }, []);
+
+  useEffect(() => {
+    // When a user uploads an image, collapse the manual fields.
+    // When they remove it, expand them.
+    setManualOemVisible(!productInput.oemImage);
+  }, [productInput.oemImage]);
+
+  const validateCompetitors = (): boolean => {
+    const errors = new Map<number, { name?: string; price?: string }>();
+    let isValid = true;
+
+    productInput.competitors.forEach((competitor, index) => {
+      const rowErrors: { name?: string; price?: string } = {};
+      if (!competitor.name.trim()) {
+        rowErrors.name = 'Name cannot be empty.';
+        isValid = false;
+      }
+      if (!competitor.price.trim()) {
+        rowErrors.price = 'Price cannot be empty.';
+        isValid = false;
+      } else if (isNaN(Number(competitor.price))) {
+        rowErrors.price = 'Price must be a valid number.';
+        isValid = false;
+      }
+
+      if (Object.keys(rowErrors).length > 0) {
+        errors.set(index, rowErrors);
+      }
+    });
+
+    setCompetitorErrors(errors);
+    return isValid;
+  };
+
+  const handleGenerateClick = () => {
+    if (validateCompetitors()) {
+      onGenerate();
+    }
+  };
   
   const handleSaveProduct = () => {
     try {
@@ -73,7 +122,28 @@ const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, on
         const savedData = JSON.parse(savedDataString);
         // Ensure the loaded data has the oemImage property set to null, as it wasn't saved
         savedData.oemImage = null;
+
+        // Backward compatibility for old string format
+        if (savedData.competitor_pricing_data && !savedData.competitors) {
+          savedData.competitors = savedData.competitor_pricing_data
+            .split(',')
+            .map((pair: string) => {
+              const parts = pair.split(':');
+              const name = parts[0]?.trim() || '';
+              const price = parts.slice(1).join(':').trim() || '';
+              return { name, price };
+            })
+            .filter((c: CompetitorInput) => c.name);
+          delete savedData.competitor_pricing_data;
+        }
+
+        // Ensure competitors is an array
+        if (!Array.isArray(savedData.competitors)) {
+          savedData.competitors = [];
+        }
+
         setProductInput(savedData);
+        setCompetitorErrors(new Map()); // Clear errors on load
       } catch (error) {
         console.error("Failed to load or parse product data:", error);
         alert("Could not load product data. It may be corrupted.");
@@ -109,9 +179,38 @@ const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, on
     }
   };
 
+  const handleCompetitorChange = (index: number, field: keyof CompetitorInput, value: string) => {
+    const updatedCompetitors = [...productInput.competitors];
+    updatedCompetitors[index] = { ...updatedCompetitors[index], [field]: value };
+    setProductInput(prev => ({ ...prev, competitors: updatedCompetitors }));
+  };
+
+  const addCompetitor = () => {
+    setProductInput(prev => ({
+      ...prev,
+      competitors: [...prev.competitors, { name: '', price: '' }],
+    }));
+  };
+
+  const removeCompetitor = (index: number) => {
+    const updatedCompetitors = productInput.competitors.filter((_, i) => i !== index);
+    setProductInput(prev => ({ ...prev, competitors: updatedCompetitors }));
+
+    const newErrors = new Map(competitorErrors);
+    newErrors.delete(index);
+    setCompetitorErrors(newErrors);
+  };
+
 
   return (
     <div className="bg-slate-800/50 p-6 rounded-lg shadow-lg border border-slate-700">
+      {previewSpecs && (
+        <SpecPreviewModal
+            specs={previewSpecs}
+            onApply={onApplySpecs}
+            onCancel={onCancelPreview}
+        />
+      )}
       <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
         <h2 className="text-2xl font-bold text-slate-100">Product Details</h2>
         <div className="flex items-center gap-2">
@@ -130,7 +229,7 @@ const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, on
                 Load Product
             </button>
             <button
-              onClick={onGenerate}
+              onClick={handleGenerateClick}
               disabled={isLoading}
               className="flex justify-center items-center bg-brand-primary text-white font-bold py-2 px-4 rounded-md hover:bg-brand-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-brand-accent disabled:bg-slate-600 disabled:cursor-not-allowed transition duration-150 ease-in-out text-sm"
             >
@@ -152,6 +251,31 @@ const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, on
         
         <fieldset className="border border-slate-600 p-4 rounded-md">
           <legend className="text-lg font-semibold px-2 text-brand-accent">OEM Label Data</legend>
+          
+          <div className="mb-4">
+            <label htmlFor="autoFill" className="block text-sm font-medium text-slate-300 mb-1">Auto-fill from URL or Model Number</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                id="autoFill"
+                value={autoFillText}
+                onChange={(e) => setAutoFillText(e.target.value)}
+                placeholder="Paste URL or model number here"
+                className="flex-grow w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-accent focus:border-brand-accent transition placeholder:text-slate-400/70"
+              />
+              <button
+                onClick={() => onAutoFill(autoFillText)}
+                disabled={isFetchingSpecs}
+                className="flex justify-center items-center bg-slate-600 text-white font-bold py-2 px-4 rounded-md hover:bg-slate-500 disabled:bg-slate-700 disabled:cursor-not-allowed transition-colors"
+              >
+                {isFetchingSpecs ? (
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                ) : "Analyze"}
+              </button>
+            </div>
+            {fetchSpecsError && <p className="text-red-400 text-xs mt-1">{fetchSpecsError}</p>}
+          </div>
+
           <div className="grid grid-cols-1 sm:col-span-2 gap-y-4">
               <div className="col-span-1 sm:col-span-2">
                 <label htmlFor="oemImage" className="block text-sm font-medium text-slate-300">
@@ -213,21 +337,41 @@ const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, on
                   </div>
                 )}
               </div>
-              <p className="text-center text-sm text-slate-400 sm:col-span-2">Or fill in the details manually:</p>
+              <p className="text-center text-sm text-slate-400 sm:col-span-2">
+                {productInput.oemImage ? '' : 'Or fill in the details manually:'}
+              </p>
+               {productInput.oemImage && (
+                <div className="sm:col-span-2 text-center">
+                  <button
+                    onClick={() => setManualOemVisible(!isManualOemVisible)}
+                    className="text-sm text-brand-accent hover:text-blue-400 transition-colors duration-200"
+                    aria-expanded={isManualOemVisible}
+                  >
+                    {isManualOemVisible ? 'Hide Manual Fields' : 'Edit / View Manual Fields'}
+                     <svg xmlns="http://www.w3.org/2000/svg" className={`inline-block h-4 w-4 ml-1 transition-transform duration-300 ${isManualOemVisible ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-            <InputField label="Brand" id="brand" value={productInput.oem_label_data.brand} onChange={handleOemChange} placeholder="e.g., Lenovo" />
-            <InputField label="Model Name" id="model_name" value={productInput.oem_label_data.model_name} onChange={handleOemChange} placeholder="e.g., E51-80" />
-            <InputField label="MTM (SKU)" id="mtm" value={productInput.oem_label_data.mtm} onChange={handleOemChange} placeholder="e.g., 80QQB006QSA" />
-            <InputField label="CPU" id="cpu" value={productInput.oem_label_data.cpu} onChange={handleOemChange} placeholder="e.g., Intel Core i5-6200U @ 2.30GHz" />
-            <InputField label="RAM" id="ram" value={productInput.oem_label_data.ram} onChange={handleOemChange} placeholder="e.g., 8GB DDR3L" />
-            <InputField label="Storage" id="storage" value={productInput.oem_label_data.storage} onChange={handleOemChange} placeholder="e.g., 256GB SSD" />
-            <InputField label="Display" id="display" value={productInput.oem_label_data.display} onChange={handleOemChange} placeholder="e.g., 15.6-inch HD (1366x768)" />
-            <InputField label="OS" id="os" value={productInput.oem_label_data.os} onChange={handleOemChange} placeholder="e.g., Windows 10 Pro" />
-            <InputField label="GPU" id="gpu" value={productInput.oem_label_data.gpu} onChange={handleOemChange} placeholder="e.g., Intel HD Graphics 520" />
-            <InputField label="Webcam" id="webcam" value={productInput.oem_label_data.webcam} onChange={handleOemChange} placeholder="e.g., 720p HD" />
-          </div>
+          
+            <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isManualOemVisible ? 'max-h-[1000px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <InputField label="Brand" id="brand" value={productInput.oem_label_data.brand} onChange={handleOemChange} placeholder="e.g., Lenovo" />
+                    <InputField label="Model Name" id="model_name" value={productInput.oem_label_data.model_name} onChange={handleOemChange} placeholder="e.g., E51-80" />
+                    <InputField label="MTM (SKU)" id="mtm" value={productInput.oem_label_data.mtm} onChange={handleOemChange} placeholder="e.g., 80QQB006QSA" />
+                    <InputField label="CPU" id="cpu" value={productInput.oem_label_data.cpu} onChange={handleOemChange} placeholder="e.g., Intel Core i5-6200U @ 2.30GHz" />
+                    <InputField label="RAM" id="ram" value={productInput.oem_label_data.ram} onChange={handleOemChange} placeholder="e.g., 8GB DDR3L" />
+                    <InputField label="Storage" id="storage" value={productInput.oem_label_data.storage} onChange={handleOemChange} placeholder="e.g., 256GB SSD" />
+                    <InputField label="Display" id="display" value={productInput.oem_label_data.display} onChange={handleOemChange} placeholder="e.g., 15.6-inch" />
+                    <InputField label="Resolution" id="resolution" value={productInput.oem_label_data.resolution} onChange={handleOemChange} placeholder="e.g., 1920x1080" />
+                    <InputField label="OS" id="os" value={productInput.oem_label_data.os} onChange={handleOemChange} placeholder="e.g., Windows 10 Pro" />
+                    <InputField label="GPU" id="gpu" value={productInput.oem_label_data.gpu} onChange={handleOemChange} placeholder="e.g., Intel HD Graphics 520" />
+                    <InputField label="Webcam" id="webcam" value={productInput.oem_label_data.webcam} onChange={handleOemChange} placeholder="e.g., 720p HD" />
+                    <InputField label="Color" id="color" value={productInput.oem_label_data.color} onChange={handleOemChange} placeholder="e.g., Grey" />
+                </div>
+            </div>
         </fieldset>
 
         <fieldset className="border border-slate-600 p-4 rounded-md">
@@ -241,18 +385,67 @@ const InputForm: React.FC<InputFormProps> = ({ productInput, setProductInput, on
         </fieldset>
         
         <fieldset className="border border-slate-600 p-4 rounded-md">
-            <legend className="text-lg font-semibold px-2 text-brand-accent">Pricing</legend>
+            <legend className="text-lg font-semibold px-2 text-brand-accent">Pricing Intelligence</legend>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
                 <InputField label="Our Price (ZAR)" id="price" value={productInput.price} onChange={handleChange} placeholder="e.g., 4999.00" />
+                <InputField label="Cost Price (ZAR)" id="costPrice" value={productInput.costPrice || ''} onChange={handleChange} placeholder="e.g., 3500.00" />
+            </div>
+             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                 <InputField label="Location" id="location" value={productInput.location} onChange={handleChange} placeholder="e.g., Benoni, Gauteng" />
             </div>
             <div className="mt-4">
-                 <TextAreaField label="Competitor Pricing Data" id="competitor_pricing_data" value={productInput.competitor_pricing_data} onChange={handleChange} placeholder="Enter competitor pricing as Name: Price pairs, separated by commas (e.g., Takealot: 5500, Evetech: 5150)." />
+                <label className="block text-sm font-medium text-slate-300 mb-2">Competitor Pricing Data</label>
+                <div className="space-y-3">
+                    {productInput.competitors.map((competitor, index) => {
+                        const errors = competitorErrors.get(index);
+                        return (
+                            <div key={index} className="flex items-start gap-2">
+                                <div className="flex-1">
+                                    <input
+                                        type="text"
+                                        value={competitor.name}
+                                        onChange={(e) => handleCompetitorChange(index, 'name', e.target.value)}
+                                        placeholder="Competitor Name"
+                                        className={`w-full bg-slate-700 border rounded-md shadow-sm py-2 px-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-accent transition placeholder:text-slate-400/70 ${errors?.name ? 'border-red-500' : 'border-slate-600'}`}
+                                        aria-label="Competitor Name"
+                                    />
+                                    {errors?.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
+                                </div>
+                                <div className="flex-1">
+                                    <input
+                                        type="text"
+                                        value={competitor.price}
+                                        onChange={(e) => handleCompetitorChange(index, 'price', e.target.value)}
+                                        placeholder="Price (e.g., 5500)"
+                                        className={`w-full bg-slate-700 border rounded-md shadow-sm py-2 px-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-accent transition placeholder:text-slate-400/70 ${errors?.price ? 'border-red-500' : 'border-slate-600'}`}
+                                        aria-label="Competitor Price"
+                                    />
+                                    {errors?.price && <p className="text-red-400 text-xs mt-1">{errors.price}</p>}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => removeCompetitor(index)}
+                                    className="bg-red-600/80 hover:bg-red-700 text-white rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-red-500 h-[42px]"
+                                    aria-label={`Remove competitor ${index + 1}`}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+                <button
+                    type="button"
+                    onClick={addCompetitor}
+                    className="mt-3 bg-slate-600 text-white font-bold py-2 px-4 rounded-md hover:bg-slate-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-brand-accent transition-all duration-150 ease-in-out text-sm"
+                >
+                    + Add Competitor
+                </button>
             </div>
         </fieldset>
 
         <button
-          onClick={onGenerate}
+          onClick={handleGenerateClick}
           disabled={isLoading}
           className="w-full flex justify-center items-center bg-brand-primary text-white font-bold py-3 px-4 rounded-md hover:bg-brand-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-brand-accent disabled:bg-slate-600 disabled:cursor-not-allowed transition duration-150 ease-in-out"
         >

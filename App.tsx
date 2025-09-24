@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { ProductInput, GeneratedContent } from './types';
-import { generateProductContent } from './services/geminiService';
+import { ProductInput, GeneratedContent, OEMLabelData } from './types';
+import { generateProductContent, fetchSpecsFromText } from './services/geminiService';
 import InputForm from './components/InputForm';
 import OutputDisplay from './components/OutputDisplay';
 import Header from './components/Header';
@@ -19,14 +19,17 @@ const initialProductData: ProductInput = {
     os: "",
     gpu: "",
     webcam: "",
+    resolution: "",
+    color: "",
   },
   condition: "Refurbished",
   target_audience: "Professionals, Students, Small Business Owners",
   usp: "Dependable performance, Durable build, Affordable price, Local South African warranty",
   price: "",
+  costPrice: "",
   location: "Benoni, Gauteng",
   local_seo_tags: "Benoni laptop deals, Gauteng refurbished laptops, South Africa tech store",
-  competitor_pricing_data: "",
+  competitors: [],
 };
 
 const loadingMessages = [
@@ -45,8 +48,10 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState(loadingMessages[0]);
-  
-  // Fix: Use ReturnType<typeof setInterval> for browser compatibility instead of NodeJS.Timeout
+  const [isFetchingSpecs, setIsFetchingSpecs] = useState<boolean>(false);
+  const [fetchSpecsError, setFetchSpecsError] = useState<string | null>(null);
+  const [previewSpecs, setPreviewSpecs] = useState<Partial<OEMLabelData> | null>(null);
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -99,6 +104,34 @@ const App: React.FC = () => {
     }
   }, [productInput]);
 
+  const handleAutoFill = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+    setIsFetchingSpecs(true);
+    setFetchSpecsError(null);
+    setPreviewSpecs(null);
+    try {
+      const specs = await fetchSpecsFromText(text);
+      setPreviewSpecs(specs);
+    } catch (err) {
+      console.error("Error fetching specs:", err);
+      setFetchSpecsError(err instanceof Error ? err.message : "Failed to fetch specs.");
+    } finally {
+      setIsFetchingSpecs(false);
+    }
+  }, []);
+  
+  const handleApplySpecs = (specsToApply: Partial<OEMLabelData>) => {
+    setProductInput(prev => ({
+      ...prev,
+      oem_label_data: { ...prev.oem_label_data, ...specsToApply }
+    }));
+    setPreviewSpecs(null);
+  };
+
+  const handleCancelPreview = () => {
+    setPreviewSpecs(null);
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 font-sans p-4 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto">
@@ -109,6 +142,12 @@ const App: React.FC = () => {
             setProductInput={setProductInput}
             onGenerate={handleGenerateContent}
             isLoading={isLoading}
+            onAutoFill={handleAutoFill}
+            isFetchingSpecs={isFetchingSpecs}
+            fetchSpecsError={fetchSpecsError}
+            previewSpecs={previewSpecs}
+            onApplySpecs={handleApplySpecs}
+            onCancelPreview={handleCancelPreview}
           />
           <div className="relative">
             {isLoading && (
@@ -130,7 +169,7 @@ const App: React.FC = () => {
                 <div className="h-full flex items-center justify-center bg-slate-800/50 border-2 border-dashed border-slate-700 rounded-lg p-8">
                   <div className="text-center">
                     <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2-2z" />
                     </svg>
                     <h3 className="mt-2 text-sm font-medium text-slate-400">Generated content will appear here</h3>
                     <p className="mt-1 text-sm text-slate-500">Fill in the details and click "Generate".</p>

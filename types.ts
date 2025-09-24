@@ -9,6 +9,13 @@ export interface OEMLabelData {
   os: string;
   gpu: string;
   webcam: string;
+  resolution: string;
+  color: string;
+}
+
+export interface CompetitorInput {
+  name: string;
+  price: string;
 }
 
 export interface ProductInput {
@@ -18,9 +25,10 @@ export interface ProductInput {
   target_audience: string; // Comma-separated
   usp: string; // Comma-separated
   price: string;
+  costPrice?: string;
   location: string;
   local_seo_tags: string; // Comma-separated
-  competitor_pricing_data: string; // Comma-separated "Name: price" pairs
+  competitors: CompetitorInput[];
 }
 
 export interface Competitor {
@@ -36,6 +44,10 @@ export interface PricingAnalysis {
   suggestedPrice: number | null;
   rationale: string;
   competitors: Competitor[];
+  priceGap: number | null;
+  recommendation: string;
+  margin: number | null;
+  profit: number | null;
 }
 
 export interface GeneratedContent {
@@ -45,7 +57,7 @@ export interface GeneratedContent {
   longDescriptionHtml: string;
   shortDescriptionHtml: string;
   metaDescription: string;
-  productAttributes: Record<string, string>;
+  productAttributes: string; // Changed from Record<string, string>
   productTags: string; // Comma-separated
   pricingAnalysis: PricingAnalysis;
 }
